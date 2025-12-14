@@ -66,9 +66,11 @@ app.post('/validate', (req, res) => {
 
 
 
-app.listen(PORT, () => {
-    console.log(`Validator running at http://localhost:${PORT}`);
-});
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`Validator running at http://localhost:${PORT}`);
+    });
+}
 
 
 module.exports = { app, luhnCheck, getCardIssuer };
