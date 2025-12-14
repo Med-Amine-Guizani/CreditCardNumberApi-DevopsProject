@@ -65,6 +65,11 @@ app.post('/validate', (req, res) => {
 });
 
 
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', uptime: process.uptime() });
+});
+
+
 
 if (require.main === module) {
     app.listen(PORT, () => {
