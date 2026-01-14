@@ -30,32 +30,18 @@ jobs:
       - name: Run Tests
         run: npm test
         
-      - name: Run DAST Scan
+      - name: Run DAST Scan using ZAP Docker
         run: |
-          echo "Starting app in the background..."
-          # Start your Node.js app on port 3000 in background
+          # Start your app in the background
           npm start &
           APP_PID=$!
-          
-          # Wait for the app to be ready
-          echo "Waiting 10 seconds for the app to start..."
           sleep 10
-          
-          # Install OWASP ZAP CLI
-          sudo apt-get update
-          sudo apt-get install -y zaproxy
-          
-          # Start ZAP daemon
-          zap.sh -daemon -port 8090 -host 127.0.0.1 -config api.disablekey=true &
-          ZAP_PID=$!
-          sleep 10
-          
-          # Run active scan against the running app
-          zap-cli -p 8090 quick-scan http://localhost:3000
-          
-          # Kill app and ZAP after scan
+
+          # Run ZAP scan via Docker
+          docker run --rm -t owasp/zap2docker-stable zap-baseline.py -t http://host.docker.internal:3000 -r dast-report.html
+
+          # Kill the app
           kill $APP_PID
-          kill $ZAP_PID
 
  
   build_and_push:
