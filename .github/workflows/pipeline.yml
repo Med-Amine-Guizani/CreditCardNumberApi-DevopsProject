@@ -30,18 +30,19 @@ jobs:
       - name: Run Tests
         run: npm test
 
-      - name: Check Docker
-        run: docker info
-        
       - name: Run DAST Scan using ZAP Docker
         run: |
           # Start your app in the background
           npm start &
           APP_PID=$!
+          echo "Waiting for app to start..."
           sleep 10
 
-          # Run ZAP scan via Docker
-          docker run --rm -t owasp/zap2docker-stable zap-baseline.py -t http://host.docker.internal:3000 -r dast-report.html
+          # Pull ZAP Docker image explicitly (avoids pull issues)
+          docker pull owasp/zap2docker-stable
+
+          # Run ZAP scan using host network so container can access localhost
+          docker run --rm --network host owasp/zap2docker-stable zap-baseline.py -t http://localhost:3000 -r dast-report.html
 
           # Kill the app
           kill $APP_PID
