@@ -10,18 +10,6 @@ jobs:
 
   test_and_scan:
     runs-on: ubuntu-latest
-    services:
-      app:
-        image: node:18
-        ports:
-          - 3000:3000
-        options: >-
-          --entrypoint sh
-        env:
-          NODE_ENV: development
-        volumes:
-          - .:/app
-        command: -c "cd /app && npm install && npm start"
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -34,27 +22,59 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
+     
       - name: Security Audit (SAST)
         run: npm audit --audit-level=high
 
+      
       - name: Run Tests
         run: npm test
-
-      
-      - name: Install OWASP ZAP CLI
+        
+      - name: Run DAST Scan
         run: |
+          echo "Starting app in the background..."
+          # Start your Node.js app on port 3000 in background
+          npm start &
+          APP_PID=$!
+          
+          # Wait for the app to be ready
+          echo "Waiting 10 seconds for the app to start..."
+          sleep 10
+          
+          # Install OWASP ZAP CLI
           sudo apt-get update
           sudo apt-get install -y zaproxy
           
-      - name: Run DAST Scan
-        run: |
-          # Wait for your app to be up
-          echo "Waiting for the app to start..."
-          sleep 10
-          
-          # Run ZAP in daemon mode to scan localhost:3000
+          # Start ZAP daemon
           zap.sh -daemon -port 8090 -host 127.0.0.1 -config api.disablekey=true &
+          ZAP_PID=$!
           sleep 10
           
-          # Run active scan against the app
+          # Run active scan against the running app
           zap-cli -p 8090 quick-scan http://localhost:3000
+          
+          # Kill app and ZAP after scan
+          kill $APP_PID
+          kill $ZAP_PID
+
+ 
+  build_and_push:
+    needs: test_and_scan 
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' 
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/luhn-validator:latest
