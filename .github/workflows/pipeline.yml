@@ -29,6 +29,9 @@ jobs:
       
       - name: Run Tests
         run: npm test
+
+      - name: Check Docker
+        run: docker info
         
       - name: Run DAST Scan using ZAP Docker
         run: |
