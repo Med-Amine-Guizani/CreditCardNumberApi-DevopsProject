@@ -32,8 +32,8 @@ jobs:
 
       - name: Start API in Background
         run: |
-          npm start &
-          npx wait-on http://localhost:3000
+          npm start > /dev/null 2>&1 &
+          npx -y wait-on tcp:3000 --timeout 60000
 
       - name: Run ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.10.0
