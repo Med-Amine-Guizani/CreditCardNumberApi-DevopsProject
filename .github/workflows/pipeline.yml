@@ -35,7 +35,7 @@ jobs:
           npm start > /dev/null 2>&1 &
           npx -y wait-on tcp:3000 --timeout 60000
 
-          
+
       - name: Grant Workspace Permissions
         run: chmod -R 777 .
 
@@ -44,6 +44,7 @@ jobs:
         with:
           target: 'http://localhost:3000'
           fail_action: false
+          allow_issue_writing: false
 
  
   build_and_push:

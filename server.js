@@ -4,6 +4,9 @@ const PORT = 3000;
 
 app.use(express.json());
 
+app.get('/', (req, res) => {
+    res.send('Luhn Algorithm Validator API is Running!');
+});
 
 const luhnCheck = (num) => {
     const sanitized = String(num).replace(/\D/g, '');
