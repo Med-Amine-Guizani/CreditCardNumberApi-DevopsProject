@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const winston = require('winston');
-const client = require('prom-client'); 
+const client = require('prom-client');
 const app = express();
 const PORT = 3000;
 
@@ -10,63 +10,85 @@ app.use(express.json());
 
 const logger = winston.createLogger({
     level: 'info',
-    format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+    ),
     defaultMeta: { service: 'luhn-validator' },
-    transports: [new winston.transports.Console()]
+    transports: [
+        new winston.transports.Console()
+    ]
 });
 
 
-const collectDefaultMetrics = client.collectDefaultMetrics;
-collectDefaultMetrics(); 
-
-
-const httpRequestCounter = new client.Counter({
-    name: 'http_requests_total',
-    help: 'Total number of HTTP requests',
-    labelNames: ['method', 'route', 'status']
-});
-
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', uptime: process.uptime() });
-});
+const register = new client.Registry();
+client.collectDefaultMetrics({ register });
 
 const httpRequestDuration = new client.Histogram({
     name: 'http_request_duration_seconds',
     help: 'Duration of HTTP requests in seconds',
     labelNames: ['method', 'route', 'status'],
-    buckets: [0.1, 0.5, 1, 2, 5] 
+    buckets: [0.1, 0.5, 1, 2, 5],
+    registers: [register]
 });
 
+
+const metrics = {
+    totalRequests: 0,
+    totalResponseTimeMs: 0,
+    averageResponseTimeMs: 0,
+    statusCodes: { 200: 0, 400: 0, 500: 0 }
+};
 
 app.use((req, res, next) => {
     const traceId = crypto.randomUUID();
     req.traceId = traceId;
     res.setHeader('X-Trace-Id', traceId);
 
-    logger.info({ message: 'Incoming Request', traceId, method: req.method, url: req.url });
+    
+    const endPrometheusTimer = httpRequestDuration.startTimer();
+
+   
+    logger.info({
+        message: 'Incoming Request',
+        traceId: traceId,
+        method: req.method,
+        url: req.url,
+        ip: req.ip
+    });
 
     
-    const end = httpRequestDuration.startTimer();
+    metrics.totalRequests++;
+    const start = process.hrtime();
 
     res.on('finish', () => {
-        
-        end({ method: req.method, route: req.path, status: res.statusCode });
+      
+        const diff = process.hrtime(start);
+        const timeInMs = (diff[0] * 1000) + (diff[1] / 1e6);
+
+        metrics.totalResponseTimeMs += timeInMs;
+        metrics.averageResponseTimeMs = metrics.totalResponseTimeMs / metrics.totalRequests;
+
+        const code = res.statusCode;
+        metrics.statusCodes[code] = (metrics.statusCodes[code] || 0) + 1;
 
         
-        httpRequestCounter.inc({ method: req.method, route: req.path, status: res.statusCode });
+        endPrometheusTimer({ 
+            method: req.method, 
+            route: req.path, 
+            status: code 
+        });
 
-        logger.info({ message: 'Request Completed', traceId, status: res.statusCode });
+        
+        logger.info({
+            message: 'Request Completed',
+            traceId: traceId,
+            status: code,
+            durationMs: timeInMs.toFixed(2)
+        });
     });
 
     next();
-});
-
-
-
-
-app.get('/metrics', async (req, res) => {
-    res.set('Content-Type', client.register.contentType);
-    res.send(await client.register.metrics());
 });
 
 
@@ -106,17 +128,66 @@ const getCardIssuer = (number) => {
     return 'Unknown';
 };
 
+
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'UP', timestamp: new Date().toISOString() });
+});
+
+
+app.get('/metrics', async (req, res) => {
+    try {
+        res.set('Content-Type', register.contentType);
+        res.end(await register.metrics());
+    } catch (ex) {
+        res.status(500).end(ex);
+    }
+});
+
+
+app.get('/metrics/json', (req, res) => {
+    res.json({
+        uptime: process.uptime(),
+        requestCount: metrics.totalRequests,
+        averageLatency: `${metrics.averageResponseTimeMs.toFixed(2)} ms`,
+        statusBreakdown: metrics.statusCodes,
+        timestamp: new Date().toISOString()
+    });
+});
+
 app.post('/validate', (req, res) => {
     const { cardNumber } = req.body;
+
     if (!cardNumber) {
-        logger.warn({ message: 'Validation Failed', reason: 'Missing cardNumber', traceId: req.traceId });
+        logger.warn({
+            message: 'Validation Failed',
+            reason: 'Missing cardNumber field',
+            traceId: req.traceId
+        });
         return res.status(400).json({ error: 'Missing "cardNumber" field.' });
     }
+
     const isValid = luhnCheck(cardNumber);
     const issuer = getCardIssuer(cardNumber);
+
+    logger.info({
+        message: 'Card Validation Performed',
+        traceId: req.traceId,
+        isValid: isValid,
+        issuer: issuer
+    });
+
     
-    logger.info({ message: 'Card Validation Performed', traceId: req.traceId, isValid, issuer });
-    res.json({ isValid, issuer: isValid ? issuer : 'Invalid Card', cleanNumber: String(cardNumber).replace(/\D/g, ''), traceId: req.traceId });
+    res.json({
+        isValid: isValid,
+        issuer: isValid ? issuer : 'Invalid Card',
+        cleanNumber: String(cardNumber).replace(/\D/g, ''),
+        timestamp: new Date().toISOString(),
+        traceId: req.traceId
+    });
+});
+
+app.get('/', (req, res) => {
+    res.send('Luhn Algorithm Validator API is Running!');
 });
 
 if (require.main === module) {
@@ -124,4 +195,6 @@ if (require.main === module) {
         logger.info({ message: `Validator running at http://localhost:${PORT}` });
     });
 }
-module.exports = { app };
+
+
+module.exports = { app, luhnCheck, getCardIssuer };
