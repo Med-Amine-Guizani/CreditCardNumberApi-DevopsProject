@@ -30,35 +30,17 @@ jobs:
       - name: Run Tests
         run: npm test
 
-      - name: Start App & Wait
+      - name: Start API in Background
         run: |
           npm start &
-          # Use npx wait-on to ensure port 3000 is actually ready before proceeding
-          # This is much safer than 'sleep 10'
           npx wait-on http://localhost:3000
 
-      - name: Run ZAP Scan
-        run: |
-          # 1. PERMISSIONS: Allow the ZAP container user to write to this directory
-          chmod 777 $(pwd)
-
-          # 2. RUN DOCKER:
-          # --network host: Allows container to see 'localhost:3000' on the runner
-          # -v $(pwd):/zap/wrk/:rw : MOUNTS the current folder so the report is saved to your workspace
-          # -I : Ignores warnings (returns 0) so the build doesn't fail on minor issues
-          docker run --rm \
-            --network host \
-            -v $(pwd):/zap/wrk/:rw \
-            owasp/zap2docker-stable \
-            zap-baseline.py -t http://localhost:3000 -r dast-report.html -I
-
-      
-      - name: Upload ZAP Report
-        if: always() # Run this even if the scan fails
-        uses: actions/upload-artifact@v4
+      - name: Run ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.10.0
         with:
-          name: ZAP-DAST-Report
-          path: dast-report.html
+          target: 'http://localhost:3000'
+          fail_action: false
+
  
   build_and_push:
     needs: test_and_scan 
