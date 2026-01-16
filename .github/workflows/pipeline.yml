@@ -22,15 +22,32 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-     
       - name: Security Audit (SAST)
         run: npm audit --audit-level=high
 
-      
       - name: Run Tests
         run: npm test
 
- 
+      - name: Start API in Background
+        run: |
+          npm start > /dev/null 2>&1 &
+          npx -y wait-on tcp:3000 --timeout 60000
+
+      
+      - name: Run Nikto Scan
+        
+        run: |
+          docker pull secfigo/nikto
+          docker run --rm --network host secfigo/nikto -h http://localhost:3000 | tee nikto-report.txt
+
+      - name: Upload Nikto Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nikto-Report
+          path: nikto-report.txt
+     
+
   build_and_push:
     needs: test_and_scan 
     runs-on: ubuntu-latest
