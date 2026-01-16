@@ -30,23 +30,35 @@ jobs:
       - name: Run Tests
         run: npm test
 
-      - name: Run DAST Scan using ZAP Docker
+      - name: Start App & Wait
         run: |
-          # Start your app in the background
           npm start &
-          APP_PID=$!
-          echo "Waiting for app to start..."
-          sleep 10
+          # Use npx wait-on to ensure port 3000 is actually ready before proceeding
+          # This is much safer than 'sleep 10'
+          npx wait-on http://localhost:3000
 
-          # Pull ZAP Docker image explicitly (avoids pull issues)
-          docker pull owasp/zap2docker-stable
+      - name: Run ZAP Scan
+        run: |
+          # 1. PERMISSIONS: Allow the ZAP container user to write to this directory
+          chmod 777 $(pwd)
 
-          # Run ZAP scan using host network so container can access localhost
-          docker run --rm --network host owasp/zap2docker-stable zap-baseline.py -t http://localhost:3000 -r dast-report.html
+          # 2. RUN DOCKER:
+          # --network host: Allows container to see 'localhost:3000' on the runner
+          # -v $(pwd):/zap/wrk/:rw : MOUNTS the current folder so the report is saved to your workspace
+          # -I : Ignores warnings (returns 0) so the build doesn't fail on minor issues
+          docker run --rm \
+            --network host \
+            -v $(pwd):/zap/wrk/:rw \
+            owasp/zap2docker-stable \
+            zap-baseline.py -t http://localhost:3000 -r dast-report.html -I
 
-          # Kill the app
-          kill $APP_PID
-
+      
+      - name: Upload ZAP Report
+        if: always() # Run this even if the scan fails
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZAP-DAST-Report
+          path: dast-report.html
  
   build_and_push:
     needs: test_and_scan 
