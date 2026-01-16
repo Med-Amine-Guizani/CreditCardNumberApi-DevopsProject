@@ -1,11 +1,25 @@
 const express = require('express');
-const crypto = require('crypto'); 
+const crypto = require('crypto');
+const winston = require('winston'); // 1. Import Winston
 const app = express();
 const PORT = 3000;
 
 app.use(express.json());
 
+// --- 2. CONFIGURE LOGGER ---
+const logger = winston.createLogger({
+    level: 'info',
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json() // Output logs as JSON objects
+    ),
+    defaultMeta: { service: 'luhn-validator' }, // Tag all logs with service name
+    transports: [
+        new winston.transports.Console() // Print to console (Docker captures this)
+    ]
+});
 
+// --- METRICS STORAGE ---
 const metrics = {
     totalRequests: 0,
     totalResponseTimeMs: 0,
@@ -13,21 +27,21 @@ const metrics = {
     statusCodes: { 200: 0, 400: 0, 500: 0 }
 };
 
-
+// --- MIDDLEWARE ---
 app.use((req, res, next) => {
-  
     const traceId = crypto.randomUUID();
-    
-    
     req.traceId = traceId;
-
-   
     res.setHeader('X-Trace-Id', traceId);
 
-    
-    console.log(`[${traceId}] -> INCOMING ${req.method} ${req.url}`);
+    // 3. Log Incoming Request (Structured)
+    logger.info({
+        message: 'Incoming Request',
+        traceId: traceId,
+        method: req.method,
+        url: req.url,
+        ip: req.ip
+    });
 
-  
     metrics.totalRequests++;
     const start = process.hrtime();
 
@@ -41,14 +55,20 @@ app.use((req, res, next) => {
         const code = res.statusCode;
         metrics.statusCodes[code] = (metrics.statusCodes[code] || 0) + 1;
 
-        
-        console.log(`[${traceId}] <- OUTGOING Status: ${code} (${timeInMs.toFixed(2)}ms)`);
+        // 4. Log Outgoing Response (Structured)
+        // Note how easy it is to add extra data like 'duration' without messing up a string
+        logger.info({
+            message: 'Request Completed',
+            traceId: traceId,
+            status: code,
+            durationMs: timeInMs.toFixed(2)
+        });
     });
 
     next();
 });
 
-
+// --- BUSINESS LOGIC ---
 const luhnCheck = (num) => {
     const sanitized = String(num).replace(/\D/g, '');
     if (sanitized.length < 2) return false;
@@ -85,11 +105,15 @@ const getCardIssuer = (number) => {
     return 'Unknown';
 };
 
+// --- ROUTES ---
 
 app.get('/metrics', (req, res) => {
-   
-    console.log(`[${req.traceId}] Admin accessing metrics dashboard`);
-    
+    logger.info({
+        message: 'Metrics Accessed',
+        traceId: req.traceId,
+        user: 'admin' // Example of context
+    });
+
     res.json({
         uptime: process.uptime(),
         requestCount: metrics.totalRequests,
@@ -103,26 +127,34 @@ app.post('/validate', (req, res) => {
     const { cardNumber } = req.body;
 
     if (!cardNumber) {
-       
-        console.warn(`[${req.traceId}] Validation Failed: Missing cardNumber`);
+        // 5. Use 'warn' level for client errors
+        logger.warn({
+            message: 'Validation Failed',
+            reason: 'Missing cardNumber field',
+            traceId: req.traceId
+        });
         return res.status(400).json({ error: 'Missing "cardNumber" field.' });
     }
 
     const isValid = luhnCheck(cardNumber);
     const issuer = getCardIssuer(cardNumber);
 
-
-    console.log(`[${req.traceId}] Check Complete: Valid=${isValid}, Issuer=${issuer}`);
+    // 6. Log Business Logic results
+    logger.info({
+        message: 'Card Validation Performed',
+        traceId: req.traceId,
+        isValid: isValid,
+        issuer: issuer
+    });
 
     res.json({
         isValid: isValid,
         issuer: isValid ? issuer : 'Invalid Card',
         cleanNumber: String(cardNumber).replace(/\D/g, ''),
         timestamp: new Date().toISOString(),
-        traceId: req.traceId 
+        traceId: req.traceId
     });
 });
-
 
 app.get('/', (req, res) => {
     res.send('Luhn Algorithm Validator API is Running!');
@@ -130,7 +162,8 @@ app.get('/', (req, res) => {
 
 if (require.main === module) {
     app.listen(PORT, () => {
-        console.log(`Validator running at http://localhost:${PORT}`);
+        // Use logger even for startup
+        logger.info({ message: `Validator running at http://localhost:${PORT}` });
     });
 }
 
