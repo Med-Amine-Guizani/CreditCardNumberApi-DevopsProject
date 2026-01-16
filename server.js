@@ -24,12 +24,21 @@ const logger = winston.createLogger({
 const register = new client.Registry();
 client.collectDefaultMetrics({ register });
 
+
 const httpRequestDuration = new client.Histogram({
     name: 'http_request_duration_seconds',
     help: 'Duration of HTTP requests in seconds',
     labelNames: ['method', 'route', 'status'],
     buckets: [0.1, 0.5, 1, 2, 5],
     registers: [register]
+});
+
+
+const httpRequestCounter = new client.Counter({
+    name: 'http_requests_total',
+    help: 'Total number of HTTP requests',
+    labelNames: ['method', 'route', 'status'],
+    registers: [register] 
 });
 
 
@@ -40,6 +49,7 @@ const metrics = {
     statusCodes: { 200: 0, 400: 0, 500: 0 }
 };
 
+
 app.use((req, res, next) => {
     const traceId = crypto.randomUUID();
     req.traceId = traceId;
@@ -48,7 +58,6 @@ app.use((req, res, next) => {
     
     const endPrometheusTimer = httpRequestDuration.startTimer();
 
-   
     logger.info({
         message: 'Incoming Request',
         traceId: traceId,
@@ -57,12 +66,10 @@ app.use((req, res, next) => {
         ip: req.ip
     });
 
-    
     metrics.totalRequests++;
     const start = process.hrtime();
 
     res.on('finish', () => {
-      
         const diff = process.hrtime(start);
         const timeInMs = (diff[0] * 1000) + (diff[1] / 1e6);
 
@@ -72,7 +79,7 @@ app.use((req, res, next) => {
         const code = res.statusCode;
         metrics.statusCodes[code] = (metrics.statusCodes[code] || 0) + 1;
 
-        
+      
         endPrometheusTimer({ 
             method: req.method, 
             route: req.path, 
@@ -80,6 +87,12 @@ app.use((req, res, next) => {
         });
 
         
+        httpRequestCounter.inc({
+            method: req.method,
+            route: req.path,
+            status: code
+        });
+
         logger.info({
             message: 'Request Completed',
             traceId: traceId,
@@ -128,11 +141,9 @@ const getCardIssuer = (number) => {
     return 'Unknown';
 };
 
-
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'UP', timestamp: new Date().toISOString() });
 });
-
 
 app.get('/metrics', async (req, res) => {
     try {
@@ -142,7 +153,6 @@ app.get('/metrics', async (req, res) => {
         res.status(500).end(ex);
     }
 });
-
 
 app.get('/metrics/json', (req, res) => {
     res.json({
@@ -176,7 +186,6 @@ app.post('/validate', (req, res) => {
         issuer: issuer
     });
 
-    
     res.json({
         isValid: isValid,
         issuer: isValid ? issuer : 'Invalid Card',
@@ -195,6 +204,5 @@ if (require.main === module) {
         logger.info({ message: `Validator running at http://localhost:${PORT}` });
     });
 }
-
 
 module.exports = { app, luhnCheck, getCardIssuer };
