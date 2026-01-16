@@ -26,6 +26,10 @@ const httpRequestCounter = new client.Counter({
     labelNames: ['method', 'route', 'status']
 });
 
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', uptime: process.uptime() });
+});
+
 const httpRequestDuration = new client.Histogram({
     name: 'http_request_duration_seconds',
     help: 'Duration of HTTP requests in seconds',

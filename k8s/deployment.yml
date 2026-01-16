@@ -21,7 +21,7 @@ spec:
       containers:
       - name: luhn-api
         image: amineguizani33/luhn-validator:latest
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3000
         resources:
