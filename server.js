@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto'); 
 const app = express();
 const PORT = 3000;
 
@@ -9,35 +10,39 @@ const metrics = {
     totalRequests: 0,
     totalResponseTimeMs: 0,
     averageResponseTimeMs: 0,
-    statusCodes: {
-        200: 0,
-        400: 0,
-        500: 0
-    }
+    statusCodes: { 200: 0, 400: 0, 500: 0 }
 };
 
 
 app.use((req, res, next) => {
+  
+    const traceId = crypto.randomUUID();
     
-    metrics.totalRequests++;
+    
+    req.traceId = traceId;
+
+   
+    res.setHeader('X-Trace-Id', traceId);
 
     
+    console.log(`[${traceId}] -> INCOMING ${req.method} ${req.url}`);
+
+  
+    metrics.totalRequests++;
     const start = process.hrtime();
 
-    
     res.on('finish', () => {
-        
         const diff = process.hrtime(start);
-       
         const timeInMs = (diff[0] * 1000) + (diff[1] / 1e6);
 
-        
         metrics.totalResponseTimeMs += timeInMs;
         metrics.averageResponseTimeMs = metrics.totalResponseTimeMs / metrics.totalRequests;
 
-        
         const code = res.statusCode;
         metrics.statusCodes[code] = (metrics.statusCodes[code] || 0) + 1;
+
+        
+        console.log(`[${traceId}] <- OUTGOING Status: ${code} (${timeInMs.toFixed(2)}ms)`);
     });
 
     next();
@@ -81,10 +86,12 @@ const getCardIssuer = (number) => {
 };
 
 
-
 app.get('/metrics', (req, res) => {
+   
+    console.log(`[${req.traceId}] Admin accessing metrics dashboard`);
+    
     res.json({
-        uptime: process.uptime(), 
+        uptime: process.uptime(),
         requestCount: metrics.totalRequests,
         averageLatency: `${metrics.averageResponseTimeMs.toFixed(2)} ms`,
         statusBreakdown: metrics.statusCodes,
@@ -96,18 +103,29 @@ app.post('/validate', (req, res) => {
     const { cardNumber } = req.body;
 
     if (!cardNumber) {
+       
+        console.warn(`[${req.traceId}] Validation Failed: Missing cardNumber`);
         return res.status(400).json({ error: 'Missing "cardNumber" field.' });
     }
 
     const isValid = luhnCheck(cardNumber);
     const issuer = getCardIssuer(cardNumber);
 
+
+    console.log(`[${req.traceId}] Check Complete: Valid=${isValid}, Issuer=${issuer}`);
+
     res.json({
         isValid: isValid,
         issuer: isValid ? issuer : 'Invalid Card',
         cleanNumber: String(cardNumber).replace(/\D/g, ''),
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        traceId: req.traceId 
     });
+});
+
+
+app.get('/', (req, res) => {
+    res.send('Luhn Algorithm Validator API is Running!');
 });
 
 if (require.main === module) {
