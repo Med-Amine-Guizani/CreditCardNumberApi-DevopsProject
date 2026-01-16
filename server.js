@@ -4,9 +4,45 @@ const PORT = 3000;
 
 app.use(express.json());
 
-app.get('/', (req, res) => {
-    res.send('Luhn Algorithm Validator API is Running!');
+
+const metrics = {
+    totalRequests: 0,
+    totalResponseTimeMs: 0,
+    averageResponseTimeMs: 0,
+    statusCodes: {
+        200: 0,
+        400: 0,
+        500: 0
+    }
+};
+
+
+app.use((req, res, next) => {
+    
+    metrics.totalRequests++;
+
+    
+    const start = process.hrtime();
+
+    
+    res.on('finish', () => {
+        
+        const diff = process.hrtime(start);
+       
+        const timeInMs = (diff[0] * 1000) + (diff[1] / 1e6);
+
+        
+        metrics.totalResponseTimeMs += timeInMs;
+        metrics.averageResponseTimeMs = metrics.totalResponseTimeMs / metrics.totalRequests;
+
+        
+        const code = res.statusCode;
+        metrics.statusCodes[code] = (metrics.statusCodes[code] || 0) + 1;
+    });
+
+    next();
 });
+
 
 const luhnCheck = (num) => {
     const sanitized = String(num).replace(/\D/g, '');
@@ -25,10 +61,8 @@ const luhnCheck = (num) => {
     return (sum % 10) === 0;
 };
 
-
 const getCardIssuer = (number) => {
     const sanitized = String(number).replace(/\D/g, '');
-
     const patterns = {
         visa: /^4[0-9]{12}(?:[0-9]{3})?$/,
         mastercard: /^5[1-5][0-9]{14}$|^2(?:2(?:2[1-9]|[3-9][0-9])|[3-6][0-9][0-9]|7(?:[01][0-9]|20))[0-9]{12}$/,
@@ -47,6 +81,17 @@ const getCardIssuer = (number) => {
 };
 
 
+
+app.get('/metrics', (req, res) => {
+    res.json({
+        uptime: process.uptime(), 
+        requestCount: metrics.totalRequests,
+        averageLatency: `${metrics.averageResponseTimeMs.toFixed(2)} ms`,
+        statusBreakdown: metrics.statusCodes,
+        timestamp: new Date().toISOString()
+    });
+});
+
 app.post('/validate', (req, res) => {
     const { cardNumber } = req.body;
 
@@ -55,8 +100,6 @@ app.post('/validate', (req, res) => {
     }
 
     const isValid = luhnCheck(cardNumber);
-    
-    
     const issuer = getCardIssuer(cardNumber);
 
     res.json({
@@ -67,18 +110,10 @@ app.post('/validate', (req, res) => {
     });
 });
 
-
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', uptime: process.uptime() });
-});
-
-
-
 if (require.main === module) {
     app.listen(PORT, () => {
         console.log(`Validator running at http://localhost:${PORT}`);
     });
 }
-
 
 module.exports = { app, luhnCheck, getCardIssuer };
